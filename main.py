@@ -75,9 +75,7 @@ def main(**kwargs):
     gap_start = (grid_size+2-kwargs['gap_size'])//2
     gap_end = grid_size+2-gap_start
 
-    while (should_stop):
-        prev_layer = np.copy(curr_layer)
-
+    while (not should_stop):
         chunk_start, chunk_end = get_chunk(grid_size, rank, size)
 
         for i in range(chunk_start, chunk_end):
@@ -90,6 +88,9 @@ def main(**kwargs):
                     (prev_layer[x-1, y], prev_layer[x+1, y], prev_layer[x, y-1], prev_layer[x, y+1]))
 
         comm.Barrier()
+        print(rank, curr_layer)
+
+        # rank 0 overrides curr_layer
 
         if rank == 0:
             should_stop = layers_diff(
@@ -97,6 +98,8 @@ def main(**kwargs):
 
             for i in range(1, size):
                 comm.send(obj=should_stop, dest=i)
+
+            prev_layer = np.copy(curr_layer)
         else:
             should_stop = comm.recv(source=0)
 
@@ -104,7 +107,6 @@ def main(**kwargs):
 
     if rank != 0:
         exit(0)
-    print(curr_layer)
 
 
 if __name__ == '__main__':

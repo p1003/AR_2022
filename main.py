@@ -59,11 +59,6 @@ def main(**kwargs):
     # create a numpy array whose data points to the shared mem
     buf, itemsize = win.Shared_query(0)
 
-    prev_layer = np.ndarray(buffer=buf, dtype='d',
-                            shape=(grid_size+2, grid_size+2))
-    add_boundary_condition(
-        prev_layer, kwargs['gap_size'], kwargs['external_voltage'])
-
     curr_layer = np.ndarray(buffer=buf, dtype='d',
                             offset=nbytes, shape=(grid_size+2, grid_size+2))
     add_boundary_condition(
@@ -76,6 +71,8 @@ def main(**kwargs):
     gap_end = grid_size+2-gap_start
 
     while (not should_stop):
+        prev_layer = np.copy(curr_layer)
+
         chunk_start, chunk_end = get_chunk(grid_size, rank, size)
 
         for i in range(chunk_start, chunk_end):

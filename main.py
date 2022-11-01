@@ -83,15 +83,13 @@ def main(**kwargs):
             for i in range(1,size):
                 comm.send(obj=should_stop, dest=i)
         else:
-            # TODO: recv shoud_stop
             should_stop = comm.recv(source=0)
 
         comm.Barrier()
-
-        
-
-
-
+    
+    if rank != 0:
+        exit(0)
+    print(curr_layer)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

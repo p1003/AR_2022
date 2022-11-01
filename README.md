@@ -1,13 +1,14 @@
 # AR_2022
 
 Running:
-  TODO
+TODO
 
 Arguments:
- - -G, --grid-size : int - The resolution of the simmulation (Default: 20),
- - -g, --gap-size : int - The diameter of the conductor in the middle (Default: 4),
- - -i, --iterations : int - How many iterations to perform (Default: 30),
- - -V, --conductor_voltage : float - The voltage of the conductor (Default: 1.),
+
+- -G, --grid-size : int - The resolution of the simmulation (Default: 20),
+- -g, --gap-size : int - The diameter of the conductor in the middle (Default: 4),
+- -i, --iterations : int - How many iterations to perform (Default: 30),
+- -V, --conductor_voltage : float - The voltage of the conductor (Default: 1.),
 
 Result for 30 iterations on a 20 by 20 grid with V=1 and gap_size=4:
 

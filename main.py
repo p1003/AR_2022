@@ -117,7 +117,7 @@ def main(**kwargs):
                 # get values for neighbor cells
 
                 neighbor_values = [
-                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(x_, y_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
+                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
                 ]
 
                 curr_layer[x, y] = calculate_value(neighbor_values)

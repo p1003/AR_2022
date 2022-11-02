@@ -59,7 +59,7 @@ def get_rank_for_cell(x: int, y: int, grid_size: int, size: int, gap_size: int):
 
     pos = x+(y//3*grid_size)  # possibly x, y should be reversed
 
-    return str(pos//length)
+    return pos//length
 
 
 def hash_cell_pos(x, y, grid_size):
@@ -117,7 +117,7 @@ def main(**kwargs):
                 # get values for neighbor cells
 
                 neighbor_values = [
-                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
+                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(source=rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
                 ]
 
                 curr_layer[x, y] = calculate_value(neighbor_values)

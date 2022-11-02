@@ -73,11 +73,13 @@ def main(**kwargs):
 
     grid_size = kwargs['grid_size']
 
-    curr_layer = add_boundary_condition(
-        np.zeros((grid_size, grid_size)), kwargs['gap_size'], kwargs['external_voltage'])
+    curr_layer = np.zeros((grid_size, grid_size))
+    add_boundary_condition(
+        curr_layer, kwargs['gap_size'], kwargs['external_voltage'])
 
-    prev_layer = add_boundary_condition(
-        np.zeros((grid_size, grid_size)), kwargs['gap_size'], kwargs['external_voltage'])
+    prev_layer = np.zeros((grid_size, grid_size))
+    add_boundary_condition(
+        prev_layer, kwargs['gap_size'], kwargs['external_voltage'])
 
     chunk_start, chunk_end = get_chunk(grid_size, rank, size)
 

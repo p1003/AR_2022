@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --nodes 1
-#SBATCH --ntasks 10
+#SBATCH --ntasks 9
 #SBATCH --time=00:00:39
 #SBATCH --partition=plgrid
 #SBATCH -A plgccbmc11-cpu
@@ -17,3 +17,6 @@ cd ${WORKSPACE}
 cp ${HOME}/ar/main.py ${WORKSPACE}
 
 mpiexec python3 main.py
+
+cd ${HOME}
+rm -r ${WORKSPACE}

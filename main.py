@@ -85,6 +85,7 @@ def main(**kwargs):
 
     # send inital messages to neighbors
     for i in range(chunk_start, chunk_end):
+        print(f'Job {rank} working on chunk: ({chunk_start}, {chunk_end})')
         for j in range(1, 4):
             x = 1+i % grid_size
             y = j+3*(i//grid_size)
@@ -102,31 +103,37 @@ def main(**kwargs):
                                tag=hash_cell_pos(x_, y_, grid_size))
 
     for t in range(kwargs['iterations']):
+        if rank == 0:
+            print(f'Iteration {t}')
 
         for i in range(chunk_start, chunk_end):
             for j in range(1, 4):
                 x = 1+i % grid_size
                 y = j+3*(i//grid_size)
 
-                # get tuple (neighbor rank, cells x, cells y)
+                # TODO: check self rank_
+                if get_rank_for_cell(x, y, grid_size, size, kwargs['gap_size']) != -1:
 
-                neighbor_ranks = [
-                    (get_rank_for_cell(x_, y_, grid_size, size, kwargs['gap_size']), x_, y_) for x_ in [x-1, x+1] for y_ in [y-1, y+1]
-                ]
+                    # get tuple (neighbor rank, cells x, cells y)
+                    neighbor_ranks = [
+                        (get_rank_for_cell(x_, y_, grid_size, size, kwargs['gap_size']), x_, y_) for x_ in [x-1, x+1] for y_ in [y-1, y+1]
+                    ]
 
-                # get values for neighbor cells
+                    # get values for neighbor cells
+                    # try:
+                    neighbor_values = [
+                        prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(source=rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
+                    ]
+                    # except:
+                    #     print(neighbor_ranks) -> [(-1, 19, 12), (-1, 19, 14), (-1, 21, 12), (-1, 21, 14)]
 
-                neighbor_values = [
-                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(source=rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
-                ]
+                    curr_layer[x, y] = calculate_value(neighbor_values)
 
-                curr_layer[x, y] = calculate_value(neighbor_values)
-
-                # send messages with the calculated values to neighbors in different ranks
-                for rank_, x_, y_ in neighbor_ranks:
-                    if rank_ not in [rank, -1]:
-                        comm.isend(curr_layer[x, y], dest=rank_,
-                                   teg=hash_cell_pos(x_, y_, grid_size))
+                    # send messages with the calculated values to neighbors in different ranks
+                    for rank_, x_, y_ in neighbor_ranks:
+                        if rank_ not in [rank, -1]:
+                            comm.isend(curr_layer[x, y], dest=rank_,
+                                    teg=hash_cell_pos(x_, y_, grid_size))
 
         # update layers
         prev_layer = np.copy(curr_layer)
@@ -164,12 +171,13 @@ if __name__ == '__main__':
         prog='Program Name',
         description='Description.',
     )
+    print("Ale frajda, w ogóle się nie printuję")
 
     parser.add_argument('filename')
     parser.add_argument('-g', '--grid_size', type=int, default=20)
     parser.add_argument('--gap_size', type=int, default=4)
     parser.add_argument('--epsilon', type=float, default=0.001)
-    parser.add_argument('--iterations', type=int, default=100)
+    parser.add_argument('--iterations', type=int, default=10)
     parser.add_argument('--external_voltage', type=float, default=1.)
 
     main(**vars(parser.parse_args(sys.argv)))

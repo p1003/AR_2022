@@ -26,6 +26,8 @@ def add_boundary_condition(arr: np.ndarray, gap_size: int, external_voltage: flo
 
 
 def get_chunk(grid_size: int, rank: int, size: int) -> tuple[int, int]:
+    grid_size = grid_size-2  # exclude boundary
+
     height = grid_size//3
 
     length = ceil(grid_size*height/size)
@@ -39,71 +41,120 @@ def get_chunk(grid_size: int, rank: int, size: int) -> tuple[int, int]:
     return start, end
 
 
+def get_rank_for_cell(x: int, y: int, grid_size: int, size: int, gap_size: int):
+    # x,y in boundry guards
+    if x not in range(1, grid_size-1) or y not in range(1, grid_size-1):
+        return -1
+
+    if x in range((grid_size-gap_size)//2, (grid_size+gap_size)//2) and y in range((grid_size-gap_size)//2, (grid_size+gap_size)//2):
+        return -1
+
+    # exclude boundary
+    grid_size = grid_size-2
+    x, y = x-1, y-1
+
+    height = grid_size//3
+
+    length = ceil(grid_size*height/size)
+
+    pos = x+(y//3*grid_size)  # possibly x, y should be reversed
+
+    return str(pos//length)
+
+
+def hash_cell_pos(x, y, grid_size):
+    return x*grid_size+y
+
+
 def main(**kwargs):
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
-    if rank == 0:
-        print(kwargs)
 
-    grid_size: int = kwargs['grid_size']
+    grid_size = kwargs['grid_size']
 
-    itemsize = MPI.DOUBLE.Get_size()
-    if rank == 0:
-        nbytes = (grid_size+2) ** 2 * itemsize
-    else:
-        nbytes = 0
+    curr_layer = add_boundary_condition(
+        np.zeros((grid_size, grid_size)), kwargs['gap_size'], kwargs['external_voltage'])
 
-    win = MPI.Win.Allocate_shared(nbytes*2, itemsize, comm=comm)
+    prev_layer = add_boundary_condition(
+        np.zeros((grid_size, grid_size)), kwargs['gap_size'], kwargs['external_voltage'])
 
-    # create a numpy array whose data points to the shared mem
-    buf, itemsize = win.Shared_query(0)
+    chunk_start, chunk_end = get_chunk(grid_size, rank, size)
 
-    curr_layer = np.ndarray(buffer=buf, dtype='d',
-                            offset=nbytes, shape=(grid_size+2, grid_size+2))
-    add_boundary_condition(
-        curr_layer, kwargs['gap_size'], kwargs['external_voltage'])
+    # send inital messages to neighbors
+    for i in range(chunk_start, chunk_end):
+        for j in range(1, 4):
+            x = 1+i % grid_size
+            y = j+3*(i//grid_size)
 
-    should_stop = False
+            # get tuple (neighbor rank, cells x, cells y)
 
-    # grid_size = 18, gap = 6
-    gap_start = (grid_size+2-kwargs['gap_size'])//2
-    gap_end = grid_size+2-gap_start
+            neighbor_ranks = [
+                (get_rank_for_cell(x_, y_, grid_size, size, kwargs['gap_size']), x_, y_) for x_ in [x-1, x+1] for y_ in [y-1, y+1]
+            ]
 
-    while (not should_stop):
-        prev_layer = np.copy(curr_layer)
+            # send messages with the calculated values to neighbors in different ranks
+            for rank_, x_, y_ in neighbor_ranks:
+                if rank_ not in [rank, -1]:
+                    comm.isend(curr_layer[x, y], dest=rank_,
+                               tag=hash_cell_pos(x_, y_, grid_size))
 
-        chunk_start, chunk_end = get_chunk(grid_size, rank, size)
+    for t in range(kwargs['iterations']):
 
         for i in range(chunk_start, chunk_end):
             for j in range(1, 4):
                 x = 1+i % grid_size
                 y = j+3*(i//grid_size)
-                if x in range(gap_start, gap_end) and y in range(gap_start, gap_end):
-                    continue
-                curr_layer[x, y] = calculate_value(
-                    (prev_layer[x-1, y], prev_layer[x+1, y], prev_layer[x, y-1], prev_layer[x, y+1]))
 
-        comm.Barrier()
-        print(rank, curr_layer)
+                # get tuple (neighbor rank, cells x, cells y)
 
-        # rank 0 overrides curr_layer
+                neighbor_ranks = [
+                    (get_rank_for_cell(x_, y_, grid_size, size, kwargs['gap_size']), x_, y_) for x_ in [x-1, x+1] for y_ in [y-1, y+1]
+                ]
 
-        if rank == 0:
-            should_stop = layers_diff(
-                prev_layer=prev_layer, curr_layer=curr_layer) < kwargs['epsilon']
+                # get values for neighbor cells
 
-            for i in range(1, size):
-                comm.send(obj=should_stop, dest=i)
+                neighbor_values = [
+                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(x_, y_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
+                ]
 
-            prev_layer = np.copy(curr_layer)
-        else:
-            should_stop = comm.recv(source=0)
+                curr_layer[x, y] = calculate_value(neighbor_values)
 
-        comm.Barrier()
+                # send messages with the calculated values to neighbors in different ranks
+                for rank_, x_, y_ in neighbor_ranks:
+                    if rank_ not in [rank, -1]:
+                        comm.isend(curr_layer[x, y], dest=rank_,
+                                   teg=hash_cell_pos(x_, y_, grid_size))
 
-    if rank != 0:
-        exit(0)
+        # update layers
+        prev_layer = np.copy(curr_layer)
+
+    # wait for all to finish before assembling final results
+    comm.Barrier()
+
+    if rank == 0:
+        # list of results from all processes
+        results = [curr_layer]
+
+        # collect results from other workers
+        for i in range(1, size):
+            data = np.empty(shape=(grid_size, grid_size))
+            comm.Recv(data, source=i, tag=-1)
+            results.append(data)
+
+        # for each cell get value from associated worker and copy it to curr_layer as result
+        for x in range(1, grid_size):
+            for y in range(1, grid_size):
+                rank = get_rank_for_cell(
+                    x, y, grid_size, size, kwargs['gap_size'])
+
+                if rank not in [-1, 0]:
+                    curr_layer[x, y] = results[rank][x, y]
+
+        print(curr_layer)
+    else:
+        # send result for collection
+        comm.Send(curr_layer, dest=0, tag=-1)
 
 
 if __name__ == '__main__':
@@ -116,6 +167,7 @@ if __name__ == '__main__':
     parser.add_argument('-g', '--grid_size', type=int, default=20)
     parser.add_argument('--gap_size', type=int, default=4)
     parser.add_argument('--epsilon', type=float, default=0.001)
+    parser.add_argument('--iterations', type=int, default=100)
     parser.add_argument('--external_voltage', type=float, default=1.)
 
     main(**vars(parser.parse_args(sys.argv)))
@@ -125,3 +177,62 @@ if __name__ == '__main__':
 mpiexec -n <thread_num> python3 main.py
 
 """
+
+# grid_size: int = kwargs['grid_size']
+
+# itemsize = MPI.DOUBLE.Get_size()
+# if rank == 0:
+#     nbytes = (grid_size+2) ** 2 * itemsize
+# else:
+#     nbytes = 0
+
+# win = MPI.Win.Allocate_shared(nbytes*2, itemsize, comm=comm)
+
+# # create a numpy array whose data points to the shared mem
+# buf, itemsize = win.Shared_query(0)
+
+# curr_layer = np.ndarray(buffer=buf, dtype='d',
+#                         offset=nbytes, shape=(grid_size+2, grid_size+2))
+# add_boundary_condition(
+#     curr_layer, kwargs['gap_size'], kwargs['external_voltage'])
+
+# should_stop = False
+
+# grid_size = 18, gap = 6
+# gap_start = (grid_size+2-kwargs['gap_size'])//2
+# gap_end = grid_size+2-gap_start
+
+# while (not should_stop):
+#     prev_layer = np.copy(curr_layer)
+
+#     chunk_start, chunk_end = get_chunk(grid_size, rank, size)
+
+#     for i in range(chunk_start, chunk_end):
+#         for j in range(1, 4):
+#             x = 1+i % grid_size
+#             y = j+3*(i//grid_size)
+#             if x in range(gap_start, gap_end) and y in range(gap_start, gap_end):
+#                 continue
+#             curr_layer[x, y] = calculate_value(
+#                 (prev_layer[x-1, y], prev_layer[x+1, y], prev_layer[x, y-1], prev_layer[x, y+1]))
+
+#     comm.Barrier()
+#     print(rank, curr_layer)
+
+#     # rank 0 overrides curr_layer
+
+#     if rank == 0:
+#         should_stop = layers_diff(
+#             prev_layer=prev_layer, curr_layer=curr_layer) < kwargs['epsilon']
+
+#         for i in range(1, size):
+#             comm.send(obj=should_stop, dest=i)
+
+#         prev_layer = np.copy(curr_layer)
+#     else:
+#         should_stop = comm.recv(source=0)
+
+#     comm.Barrier()
+
+# if rank != 0:
+#     exit(0)

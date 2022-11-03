@@ -14,11 +14,11 @@ def layers_diff(prev_layer: np.ndarray, curr_layer: np.ndarray) -> bool:
     return np.max(np.abs(prev_layer-curr_layer))
 
 
-def add_boundary_condition(arr: np.ndarray, gap_size: int, external_voltage: float):
+def add_boundary_condition(arr: np.ndarray, gap_size: int, conductor_voltage: float):
     size = arr.shape[0]
     gap_start = (size-gap_size)//2
     gap_end = size-gap_start
-    arr[gap_start:gap_end, gap_start:gap_end] = external_voltage
+    arr[gap_start:gap_end, gap_start:gap_end] = conductor_voltage
     arr[0, :] = 0
     arr[-1, :] = 0
     arr[:, 0] = 0
@@ -76,11 +76,11 @@ def main(**kwargs):
 
     curr_layer = np.zeros((grid_size, grid_size))
     add_boundary_condition(
-        curr_layer, gap_size, kwargs['external_voltage'])
+        curr_layer, gap_size, kwargs['conductor_voltage'])
 
     prev_layer = np.zeros((grid_size, grid_size))
     add_boundary_condition(
-        prev_layer, gap_size, kwargs['external_voltage'])
+        prev_layer, gap_size, kwargs['conductor_voltage'])
 
     chunk_start, chunk_end = get_chunk(grid_size, rank, size)
 
@@ -111,7 +111,8 @@ def main(**kwargs):
                 y = j+3*(i//inner_grid_size)
 
                 # check self rank_
-                if x in range((grid_size-gap_size)//2, (grid_size+gap_size)//2) and y in range((grid_size-gap_size)//2, (grid_size+gap_size)//2): continue
+                if x in range((grid_size-gap_size)//2, (grid_size+gap_size)//2) and y in range((grid_size-gap_size)//2, (grid_size+gap_size)//2):
+                    continue
 
                 # get tuple (neighbor rank, cells x, cells y)
                 neighbor_ranks = [
@@ -123,14 +124,13 @@ def main(**kwargs):
                     prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(source=rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
                 ]
 
-
                 curr_layer[x, y] = calculate_value(neighbor_values)
 
                 # send messages with the calculated values to neighbors in different ranks
                 for rank_, x_, y_ in neighbor_ranks:
                     if rank_ not in [rank, -1]:
                         comm.isend(curr_layer[x, y], dest=rank_,
-                                tag=hash_cell_pos(x, y, grid_size))
+                                   tag=hash_cell_pos(x, y, grid_size))
         # update layers
         prev_layer = np.copy(curr_layer)
     print(curr_layer)
@@ -174,10 +174,9 @@ if __name__ == '__main__':
     np.set_printoptions(precision=3, linewidth=400)
 
     parser.add_argument('filename')
-    parser.add_argument('-g', '--grid_size', type=int, default=20)
-    parser.add_argument('--gap_size', type=int, default=4)
-    parser.add_argument('--epsilon', type=float, default=0.001)
-    parser.add_argument('--iterations', type=int, default=30)
-    parser.add_argument('--external_voltage', type=float, default=1.)
+    parser.add_argument('-G', '--grid_size', type=int, default=20)
+    parser.add_argument('-g', '--gap_size', type=int, default=4)
+    parser.add_argument('-i', '--iterations', type=int, default=30)
+    parser.add_argument('-V', '--conductor_voltage', type=float, default=1.)
 
     main(**vars(parser.parse_args(sys.argv)))

@@ -134,6 +134,7 @@ def main(**kwargs):
         # update layers
         prev_layer = np.copy(curr_layer)
     print(curr_layer)
+    np.save(file=f'before_merge_{rank}.npy', arr=curr_layer)
 
     # wait for all to finish before assembling final results
     comm.Barrier()
@@ -158,6 +159,7 @@ def main(**kwargs):
                     curr_layer[x, y] = results[rank][x, y]
         print('\n---------------------RESULT---------------------\n')
         print(curr_layer)
+        np.save(file=f'result.npy', arr=curr_layer)
     else:
         # send result for collection
         comm.Send(curr_layer, dest=0, tag=grid_size**2)

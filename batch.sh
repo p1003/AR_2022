@@ -18,5 +18,7 @@ cp ${HOME}/ar/main.py ${WORKSPACE}
 
 mpiexec python3 main.py
 
+cp *.npy ${HOME}/ar
+
 cd ${HOME}
 rm -r ${WORKSPACE}

@@ -83,11 +83,13 @@ def main(**kwargs):
 
     chunk_start, chunk_end = get_chunk(grid_size, rank, size)
 
+    inner_grid_size = grid_size-2
+
     # send inital messages to neighbors
     for i in range(chunk_start, chunk_end):
         for j in range(1, 4):
-            x = 1+i % grid_size
-            y = j+3*(i//grid_size)
+            x = 1+i % inner_grid_size
+            y = j+3*(i//inner_grid_size)
 
             # get tuple (neighbor rank, cells x, cells y)
 
@@ -102,11 +104,10 @@ def main(**kwargs):
                                tag=hash_cell_pos(x_, y_, grid_size))
 
     for t in range(kwargs['iterations']):
-
         for i in range(chunk_start, chunk_end):
             for j in range(1, 4):
-                x = 1+i % grid_size
-                y = j+3*(i//grid_size)
+                x = 1+i % inner_grid_size
+                y = j+3*(i//inner_grid_size)
 
                 # get tuple (neighbor rank, cells x, cells y)
 
@@ -164,6 +165,8 @@ if __name__ == '__main__':
         prog='Program Name',
         description='Description.',
     )
+
+    np.set_printoptions(precision=3, linewidth=400)
 
     parser.add_argument('filename')
     parser.add_argument('-g', '--grid_size', type=int, default=20)

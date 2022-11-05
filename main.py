@@ -25,20 +25,34 @@ def add_boundary_condition(arr: np.ndarray, gap_size: int, conductor_voltage: fl
     arr[:, -1] = 0
 
 
-def get_chunk(grid_size: int, rank: int, size: int) -> tuple[int, int]:
+def add_inner_condition(arr: np.ndarray, gap_size: int, conductor_voltage: float)
+    grid_size = arr.shape[0]
+    gap_start = (size-gap_size)//2
+    gap_end = size-gap_start
+
+
+def get_chunk(grid_size: int, rank: int, size: int) -> tuple[int, int, int]:
     grid_size = grid_size-2  # exclude boundary
 
     height = grid_size//3
 
-    length = ceil(grid_size*height/size)
+    chunk_length = ceil(grid_size*height/size)
 
-    start = length*rank
-    end = start+length
+    start = chunk_length*rank
+    end = start+chunk_length
 
     if rank == size-1:
         end = grid_size*height
 
-    return start, end
+    return start, end, end - start
+
+
+def get_local_indexes(rank: int, x: int, y: int, grid_size: int, size: int) -> tuple[int, int]:
+    chunk_start, chunk_end, chunk_length = get_chunk(grid_size, rank, size)
+
+    grid_size = grid_size-2  # exclude boundary
+
+    return (grid_size * (y+1)//3 + x) % chunk_length, y % 3
 
 
 def get_rank_for_cell(x: int, y: int, grid_size: int, size: int, gap_size: int):
@@ -55,11 +69,11 @@ def get_rank_for_cell(x: int, y: int, grid_size: int, size: int, gap_size: int):
 
     height = grid_size//3
 
-    length = ceil(grid_size*height/size)
+    chunk_length = ceil(grid_size*height/size)
 
     pos = x+(y//3*grid_size)  # possibly x, y should be reversed
 
-    return pos//length
+    return pos//chunk_length
 
 
 def hash_cell_pos(x, y, grid_size):
@@ -74,18 +88,16 @@ def main(**kwargs):
     grid_size = kwargs['grid_size']
     gap_size = kwargs['gap_size']
 
-    curr_layer = np.zeros((grid_size, grid_size))
-    add_boundary_condition(
-        curr_layer, gap_size, kwargs['conductor_voltage'])
+    chunk_start, chunk_end, chunk_length = get_chunk(grid_size, rank, size)
 
-    prev_layer = np.zeros((grid_size, grid_size))
-    add_boundary_condition(
-        prev_layer, gap_size, kwargs['conductor_voltage'])
+    curr_layer = np.zeros((chunk_length, 3))
+    # add_boundary_condition(
+    #     curr_layer, gap_size, kwargs['conductor_voltage'])
 
-    chunk_start, chunk_end = get_chunk(grid_size, rank, size)
+    prev_layer = np.copy(curr_layer)
 
     inner_grid_size = grid_size-2
-    print(f'Job {rank} working on chunk: ({chunk_start}, {chunk_end})')
+    print(f'Job {rank} working on chunk: ({chunk_start}, {chunk_end}, iterations to do: {kwargs["iterations"]})')
     # send inital messages to neighbors
     for i in range(chunk_start, chunk_end):
         for j in range(1, 4):
@@ -101,7 +113,7 @@ def main(**kwargs):
             # send messages with the calculated values to neighbors in different ranks
             for rank_, x_, y_ in neighbor_ranks:
                 if rank_ not in [rank, -1]:
-                    comm.isend(curr_layer[x, y], dest=rank_,
+                    comm.isend(curr_layer[get_local_indexes(rank, x, y, grid_size, size)], dest=rank_,
                                tag=hash_cell_pos(x, y, grid_size))
 
     for t in range(kwargs['iterations']):
@@ -121,33 +133,34 @@ def main(**kwargs):
 
                 # get values for neighbor cells
                 neighbor_values = [
-                    prev_layer[x_, y_] if rank_ in [rank, -1] else comm.recv(source=rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
+                    prev_layer[get_local_indexes(rank, x_, y_, grid_size, size)] if rank_ in [rank, -1] else comm.recv(source=rank_, tag=hash_cell_pos(x_, y_, grid_size)) for rank_, x_, y_ in neighbor_ranks
                 ]
 
-                curr_layer[x, y] = calculate_value(neighbor_values)
+                curr_layer[get_local_indexes(rank, x, y, grid_size, size)] = calculate_value(neighbor_values)
 
                 # send messages with the calculated values to neighbors in different ranks
                 for rank_, x_, y_ in neighbor_ranks:
                     if rank_ not in [rank, -1]:
-                        comm.isend(curr_layer[x, y], dest=rank_,
+                        comm.isend(curr_layer[get_local_indexes(rank, x, y, grid_size, size)], dest=rank_,
                                    tag=hash_cell_pos(x, y, grid_size))
         # update layers
         prev_layer = np.copy(curr_layer)
     print(curr_layer)
-    np.save(file=f'before_merge_{rank}.npy', arr=curr_layer)
+    # np.save(file=f'before_merge_{rank}.npy', arr=curr_layer)
 
     # wait for all to finish before assembling final results
     comm.Barrier()
 
     if rank == 0:
         # list of results from all processes
-        results = [curr_layer]
+        result_arrays = [curr_layer]
+        result_array = np.zeros(shape=(grid_size, grid_size))
 
         # collect results from other workers
         for i in range(1, size):
-            data = np.empty(shape=(grid_size, grid_size))
+            data = np.empty(shape=(chunk_length, 3))
             comm.Recv(data, source=i, tag=grid_size**2)
-            results.append(data)
+            result_arrays.append(data)
 
         # for each cell get value from associated worker and copy it to curr_layer as result
         for x in range(1, grid_size):
@@ -156,10 +169,10 @@ def main(**kwargs):
                     x, y, grid_size, size, gap_size)
 
                 if rank not in [-1, 0]:
-                    curr_layer[x, y] = results[rank][x, y]
+                    result_array[x, y] = result_arrays[rank][get_local_indexes(rank, x, y, grid_size, size)]
         print('\n---------------------RESULT---------------------\n')
-        print(curr_layer)
-        np.save(file=f'result.npy', arr=curr_layer)
+        print(result_array)
+        np.save(file=f'result.npy', arr=result_array)
     else:
         # send result for collection
         comm.Send(curr_layer, dest=0, tag=grid_size**2)

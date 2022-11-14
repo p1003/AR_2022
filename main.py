@@ -74,11 +74,11 @@ def main(**kwargs):
     grid_size = kwargs['grid_size']
     gap_size = kwargs['gap_size']
 
-    curr_layer = np.zeros((grid_size, grid_size))
+    curr_layer = np.empty((grid_size, grid_size))
     add_boundary_condition(
         curr_layer, gap_size, kwargs['conductor_voltage'])
 
-    prev_layer = np.zeros((grid_size, grid_size))
+    prev_layer = np.empty((grid_size, grid_size))
     add_boundary_condition(
         prev_layer, gap_size, kwargs['conductor_voltage'])
 
@@ -91,6 +91,10 @@ def main(**kwargs):
         for j in range(1, 4):
             x = 1+i % inner_grid_size
             y = j+3*(i//inner_grid_size)
+
+            # initialize required variables in the layers
+            curr_layer[x, y] = 0
+            prev_layer[x, y] = 0
 
             # get tuple (neighbor rank, cells x, cells y)
 
